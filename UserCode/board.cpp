@@ -9,8 +9,12 @@
 #define Board_MCU_Timer1_Period 4800
 #define Board_ServoCtrl_freq_Hz 50
 
+#define Board_MCU_Timer3_Period 480
+#define Board_MCU_Timer3_Psc (100 - 1)
+
 const uint16_t Board_MCU_Timer1_PSC = (48000000) / (Board_MCU_Timer1_Period) / (Board_ServoCtrl_freq_Hz);
 TIM::Timer boardTimer1(1, Board_MCU_Timer1_Period, Board_MCU_Timer1_PSC, 0);
+TIM::Timer boardTimer3(3, Board_MCU_Timer3_Period, Board_MCU_Timer3_Psc, 0);
 TIM::pwmType boardCtrlSignal_Servo1;
 TIM::pwmType boardCtrlSignal_Servo2;
 TIM::pwmType boardCtrlSignal_Servo3;
@@ -21,7 +25,49 @@ GPIO::GpioPin boardElectromagnet(MCU_Pin_DCT);
 #define ServoInspireRobot boardCtrlSignal_Servo2
 
 boardParaStructTypedef boardPara;
-flash::FlashBlock boardParaFlash("U SUCK", sizeof(boardParaStructTypedef));
+flash::FlashBlock boardParaFlash("U Suck", sizeof(boardParaStructTypedef));
+
+typedef struct
+{
+    uint16_t currentPosi;
+    uint16_t targetPosi;
+} boardServoSlowMove;
+
+boardServoSlowMove boardServoSlowChangeParaLeft;
+boardServoSlowMove boardServoSlowChangeParaRight;
+
+struct
+{
+    uint16_t state : 1;
+    uint16_t cnt : 15;
+} boardT3State;
+
+uint8_t boardServoSlowChange(boardServoSlowMove *servoState)
+{
+    if (servoState->currentPosi == servoState->targetPosi)
+        return 0;
+    if (servoState->currentPosi < servoState->targetPosi)
+        ++servoState->currentPosi;
+    else
+        --servoState->currentPosi;
+    return 1;
+}
+
+void boardT3Task()
+{
+    if (boardT3State.state == 0)
+        return;
+    if (boardT3State.cnt < boardPara.ServoIncTimeGapMs)
+        ++boardT3State.cnt;
+    else
+    {
+        boardT3State.cnt = 0;
+        if (boardServoSlowChange(&boardServoSlowChangeParaLeft))
+            *ServoLeft = boardServoSlowChangeParaLeft.currentPosi;
+        if (boardServoSlowChange(&boardServoSlowChangeParaRight))
+            *ServoRight = boardServoSlowChangeParaRight.currentPosi;
+    }
+}
 
 void boardInit()
 {
@@ -32,17 +78,18 @@ void boardInit()
 
     if (boardParaFlash.isEmpty())
     {
-        boardPara.InspireRobotPosiOff = 0;
-        boardPara.InspireRobotPosiOn = 100;
-        boardPara.ClickHoldTimeMs = 500;
+        boardPara.InspireRobotPosiOff = 20;
+        boardPara.InspireRobotPosiOn = 43;
+        boardPara.ClickHoldTimeMs = 800;
+        boardPara.ServoIncTimeGapMs = 10;
 
-        boardPara.LinkLength_left1 = 100;
-        boardPara.LinkLength_left2 = 100;
-        boardPara.LinkLength_right1 = 100;
-        boardPara.LinkLength_right2 = 100;
+        boardPara.LinkLength_left1 = 130;
+        boardPara.LinkLength_left2 = 120;
+        boardPara.LinkLength_right1 = 130;
+        boardPara.LinkLength_right2 = 120;
 
-        boardPara.ServoPosi_LeftX = -100;
-        boardPara.ServoPosi_RightX = 100;
+        boardPara.ServoPosi_LeftX = -140;
+        boardPara.ServoPosi_RightX = 140;
         boardPara.ServoPosi_LeftY = 0;
         boardPara.ServoPosi_RightY = 0;
 
@@ -55,12 +102,18 @@ void boardInit()
     {
         boardParaFlash.load(&boardPara);
     }
+
+    boardT3State.state = 0;
+    boardT3State.cnt = 0;
+    boardServoSlowChangeParaLeft.currentPosi = -1;
+    boardServoSlowChangeParaRight.currentPosi = -1;
+    boardTimer3.interruptConfig(boardT3Task, 0);
 }
 
 /// @brief
 /// @param p target position of servo, from 0 to 100
 /// @return pwm value
-uint16_t boardServoPosition2PwmVal(uint8_t p)
+uint16_t boardServoPosition2PwmVal(float p)
 {
     uint16_t retVal;
     float t = p;
@@ -73,8 +126,26 @@ uint16_t boardServoPosition2PwmVal(uint8_t p)
 
 void boardServoMove2Mid(void)
 {
-    *ServoLeft = boardServoPosition2PwmVal(50);
-    *ServoRight = boardServoPosition2PwmVal(50);
+    boardServoSlowChangeParaLeft.currentPosi = boardServoPosition2PwmVal(50);
+    boardServoSlowChangeParaRight.currentPosi = boardServoPosition2PwmVal(50);
+    *ServoLeft = boardServoSlowChangeParaLeft.currentPosi;
+    *ServoRight = boardServoSlowChangeParaRight.currentPosi;
+}
+
+void boardServoSlowlyMove2Position(float pl, float pr)
+{
+    if (pl > 100)
+        return;
+    if (pr > 100)
+        return;
+    if (boardServoSlowChangeParaLeft.currentPosi < 0)
+        return;
+    if (boardServoSlowChangeParaRight.currentPosi < 0)
+        return;
+
+    boardServoSlowChangeParaLeft.targetPosi = boardServoPosition2PwmVal(pl);
+    boardServoSlowChangeParaRight.targetPosi = boardServoPosition2PwmVal(pr);
+    boardT3State.state = 1;
 }
 
 void boardServoSetPosition(uint8_t idx, uint8_t p)
@@ -84,10 +155,14 @@ void boardServoSetPosition(uint8_t idx, uint8_t p)
     switch (idx)
     {
     case 0:
-        *ServoLeft = boardServoPosition2PwmVal(p);
+        boardT3State.state = 0;
+        boardServoSlowChangeParaLeft.currentPosi = boardServoPosition2PwmVal(p);
+        *ServoLeft = boardServoSlowChangeParaLeft.currentPosi;
         break;
     case 1:
-        *ServoRight = boardServoPosition2PwmVal(p);
+        boardT3State.state = 0;
+        boardServoSlowChangeParaRight.currentPosi = boardServoPosition2PwmVal(p);
+        *ServoRight = boardServoSlowChangeParaRight.currentPosi;
         break;
     case 2:
         *ServoInspireRobot = boardServoPosition2PwmVal(p);

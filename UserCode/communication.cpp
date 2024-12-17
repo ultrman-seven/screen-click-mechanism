@@ -32,7 +32,8 @@ enum uartOptionIDs
     uartOptionID_ServoDebug,
 
     uartOptionID_SetPara_ServoOffset,
-    // uartOptionID_,
+    uartOptionID_SetPara_ServoIncTime,
+    uartOptionID_ServoSlowMove,
     // uartOptionID_,
     // uartOptionID_,
 };
@@ -100,9 +101,9 @@ void uartCallbackOption(uint8_t *argv, uint32_t argc)
         break;
 
     case uartOptionID_SetPara_ClickTime:
-        if (argc < 5)
+        if (argc < 3)
             return;
-        memcpy(&boardPara.ClickHoldTimeMs, argv, 4);
+        memcpy(&boardPara.ClickHoldTimeMs, argv, 2);
         break;
 
     case uartOptionID_Click:
@@ -140,12 +141,28 @@ void uartCallbackOption(uint8_t *argv, uint32_t argc)
     case uartOptionID_SetPara_ServoOffset:
         if (argc < 6)
             return;
-
         if (argv[0])
             memcpy(&boardPara.ServoOffsetRight, argv + 1, 4);
         else
             memcpy(&boardPara.ServoOffsetLeft, argv + 1, 4);
         break;
+
+    case uartOptionID_SetPara_ServoIncTime:
+        if (argc < 3)
+            return;
+        memcpy(&boardPara.ServoIncTimeGapMs, argv, 2);
+        break;
+
+    case uartOptionID_ServoSlowMove:
+    {
+        float x, y;
+        if (argc < 9)
+            return;
+        memcpy(&x, argv, 4);
+        memcpy(&y, argv + 4, 4);
+        boardServoSlowlyMove2Position(x, y);
+        break;
+    }
 
     default:
         break;

@@ -19,7 +19,8 @@ typedef struct
     float ServoPosi_RightY;
     float ServoOffsetRight;
 
-    uint32_t ClickHoldTimeMs;
+    uint16_t ClickHoldTimeMs;
+    uint16_t ServoIncTimeGapMs;
 } boardParaStructTypedef;
 
 extern boardParaStructTypedef boardPara;
@@ -50,4 +51,6 @@ void boardCilckScreen();
 /// @param idx 0: left; 1: right; 2 inspire
 /// @param p position
 void boardServoSetPosition(uint8_t idx, uint8_t p);
+
+void boardServoSlowlyMove2Position(float pl, float pr);
 #endif /* EC1515F8_9511_4A90_81A7_E4883C204EBA */
